@@ -1,0 +1,6 @@
+include README.md
+include LICENSE
+recursive-include examples *
+recursive-include scripts *.py
+recursive-include sound_recognition *.py
+recursive-include tests *.py
