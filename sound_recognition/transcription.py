@@ -8,16 +8,18 @@ external STT services.
 import io
 import time
 import socket
+from typing import Optional
 
 import numpy as np
 import requests
+import soundfile as sf
 
 # --- Static configuration ---
 STT_HOSTNAME = "tc3.local"
 STT_PORT = 8085
 
 
-def resolve_stt_ip(hostname=None):
+def resolve_stt_ip(hostname: Optional[str] = None) -> str:
     """
     Resolve hostname to IP at startup (internal DNS cache).
     
@@ -42,7 +44,13 @@ def resolve_stt_ip(hostname=None):
 _stt_session = requests.Session()
 
 
-def transcribe_audio(audio_samples, sample_rate=16000, stt_url=None, prompt=None, model="tiny"):
+def transcribe_audio(
+    audio_samples: np.ndarray,
+    sample_rate: int = 16000,
+    stt_url: Optional[str] = None,
+    prompt: Optional[str] = None,
+    model: str = "tiny"
+) -> Optional[str]:
     """
     Send audio to STT engine and get transcription.
     
@@ -84,7 +92,6 @@ def transcribe_audio(audio_samples, sample_rate=16000, stt_url=None, prompt=None
         audio_samples = np.clip(audio_samples, -1.0, 1.0)
         
         # Convert audio to WAV format in memory
-        import soundfile as sf
         buffer = io.BytesIO()
         sf.write(buffer, audio_samples, sample_rate, format='WAV')
         buffer.seek(0)

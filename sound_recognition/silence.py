@@ -5,6 +5,8 @@ Provides audio buffering and silence detection functionality using a circular
 buffer approach with dynamic threshold adjustment.
 """
 
+from typing import Any, List, Optional
+
 import numpy as np
 import sounddevice as sd
 
@@ -45,7 +47,7 @@ class SoundBuffer:
     MIN_THRESHOLD = 0.005  # Minimum threshold to prevent going to 0
     samples_collected = 0
     
-    def __init__(self, seconds=10, device=None):
+    def __init__(self, seconds: int = 10, device: Optional[int] = None) -> None:
         """
         Initialize the sound buffer.
         
@@ -85,15 +87,15 @@ class SoundBuffer:
         )
         self.sd_stream.start()
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop the audio input stream."""
         self.sd_stream.stop()
         
-    def start(self):
+    def start(self) -> None:
         """Start the audio input stream."""
         self.sd_stream.start()
         
-    def silent_frames(self):
+    def silent_frames(self) -> List[int]:
         """
         Get indices of frames that are below the silence threshold.
         
@@ -111,7 +113,7 @@ class SoundBuffer:
                 silent_frames.append(i)
         return silent_frames
         
-    def add_sound_to_buffer(self, indata, frames, time, status):
+    def add_sound_to_buffer(self, indata: np.ndarray, frames: int, time: Any, status: Any) -> None:
         """
         Callback function for the audio input stream.
         
@@ -167,7 +169,7 @@ class SoundBuffer:
                 new_threshold = np.percentile(all_rms, 25) * 1.2
                 self.silence_threshold = max(new_threshold, self.MIN_THRESHOLD)
             
-    def is_silent(self):
+    def is_silent(self) -> bool:
         """
         Check if the current audio input is silent.
         
@@ -183,7 +185,7 @@ class SoundBuffer:
         rms = np.sqrt(np.mean(recent_samples**2))
         return rms < self.silence_threshold
     
-    def return_last_n_seconds(self, n):
+    def return_last_n_seconds(self, n: float) -> np.ndarray:
         """
         Return the last n seconds of audio from the buffer.
         

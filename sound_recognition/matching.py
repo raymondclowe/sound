@@ -5,8 +5,11 @@ Provides MFCC-based word matching functionality for comparing audio clips
 against a reference word (Temporal Feature Fingerprinting).
 """
 
+from typing import Optional, Tuple
+
 import numpy as np
 import librosa
+import soundfile as sf
 from scipy.spatial.distance import cosine
 
 
@@ -32,7 +35,7 @@ class WordMatcher:
         ...     print(f"Match found with {similarity:.1f}% similarity")
     """
     
-    def __init__(self, sample_rate=16000):
+    def __init__(self, sample_rate: int = 16000) -> None:
         """
         Initialize the WordMatcher.
         
@@ -40,11 +43,11 @@ class WordMatcher:
             sample_rate (int): Audio sample rate in Hz. Default is 16000.
         """
         self.sample_rate = sample_rate
-        self.reference_mfcc_mean = None
-        self.reference_mfcc_std = None
-        self.reference_word = None
+        self.reference_mfcc_mean: Optional[np.ndarray] = None
+        self.reference_mfcc_std: Optional[np.ndarray] = None
+        self.reference_word: Optional[str] = None
         
-    def extract_mfcc(self, audio):
+    def extract_mfcc(self, audio: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
         Extract MFCC features from audio with more discriminative power.
         
@@ -63,7 +66,7 @@ class WordMatcher:
         
         return mfcc_mean, mfcc_std
     
-    def set_reference(self, audio, word_name="target"):
+    def set_reference(self, audio: np.ndarray, word_name: str = "target") -> None:
         """
         Set the reference word to match against.
         
@@ -75,7 +78,7 @@ class WordMatcher:
         self.reference_mfcc_mean, self.reference_mfcc_std = self.extract_mfcc(audio)
         print(f"Reference word '{word_name}' set with MFCC shape: {self.reference_mfcc_mean.shape}")
         
-    def load_reference_from_file(self, filepath, word_name="target"):
+    def load_reference_from_file(self, filepath: str, word_name: str = "target") -> None:
         """
         Load reference word from audio file.
         
@@ -86,7 +89,7 @@ class WordMatcher:
         audio, sr = librosa.load(filepath, sr=self.sample_rate)
         self.set_reference(audio, word_name)
         
-    def save_reference(self, filepath, audio):
+    def save_reference(self, filepath: str, audio: np.ndarray) -> None:
         """
         Save reference audio to file.
         
@@ -94,11 +97,10 @@ class WordMatcher:
             filepath (str): Path to save the audio file.
             audio: Audio samples as numpy array.
         """
-        import soundfile as sf
         sf.write(filepath, audio, self.sample_rate)
         print(f"Reference saved to {filepath}")
         
-    def calculate_similarity(self, audio):
+    def calculate_similarity(self, audio: np.ndarray) -> float:
         """
         Calculate similarity between audio and reference word.
         
@@ -136,7 +138,7 @@ class WordMatcher:
         
         return scaled_similarity
     
-    def matches(self, audio, threshold=75):
+    def matches(self, audio: np.ndarray, threshold: float = 75) -> Tuple[bool, float]:
         """
         Check if audio matches reference word.
         
