@@ -47,7 +47,7 @@ class SoundBuffer:
     MIN_THRESHOLD = 0.005  # Minimum threshold to prevent going to 0
     samples_collected = 0
     
-    def __init__(self, seconds: int = 10, device: Optional[int] = None) -> None:
+    def __init__(self, seconds: int = 10, device: Optional[int] = None, debug: bool = False) -> None:
         """
         Initialize the sound buffer.
         Prefill buffer with a low-level noise to simulate silence and set a reasonable initial threshold.
@@ -60,6 +60,7 @@ class SoundBuffer:
         # Prefill buffer with low-level noise (simulate silence, e.g., RMS ~0.01)
         self.data = np.random.normal(0, 0.01, self.buffer_length)
         self.samples_collected = self.buffer_length  # Pretend buffer is full for thresholding
+        self.debug = debug
         # Determine number of channels for the selected device, with fallback
         channels = 1
         selected_device = device
@@ -173,20 +174,23 @@ class SoundBuffer:
     def is_silent(self) -> bool:
         """
         Check if the current audio input is silent.
-        Prints debug info about RMS and threshold.
+        Prints debug info about RMS and threshold if debug is enabled.
         Returns:
             bool: True if the current audio level is below the silence threshold.
         """
         if len(self.data) == 0 or self.frame_size == 0:
-            print("[DEBUG is_silent] No data or frame size 0, returning True")
+            if getattr(self, 'debug', False):
+                print("[DEBUG is_silent] No data or frame size 0, returning True")
             return True
         # Get the most recent frame
         recent_samples = self.return_last_n_seconds(0.1)  # Check last 100ms
         if len(recent_samples) == 0:
-            print("[DEBUG is_silent] No recent samples, returning True")
+            if getattr(self, 'debug', False):
+                print("[DEBUG is_silent] No recent samples, returning True")
             return True
         rms = np.sqrt(np.mean(recent_samples**2))
-        print(f"[DEBUG is_silent] RMS: {rms:.6f}, Threshold: {self.silence_threshold:.6f}")
+        if getattr(self, 'debug', False):
+            print(f"[DEBUG is_silent] RMS: {rms:.6f}, Threshold: {self.silence_threshold:.6f}")
         return rms < self.silence_threshold
     
     def return_last_n_seconds(self, n: float) -> np.ndarray:
