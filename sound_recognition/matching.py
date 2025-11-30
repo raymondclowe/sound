@@ -29,10 +29,19 @@ class WordMatcher:
 
     def add_reference(self, audio: np.ndarray, word_name: str = "target", filename: str = None) -> None:
         mfcc_mean, mfcc_std = self.extract_mfcc(audio)
+        # Estimate non-silent duration of the audio to account for silence padding
+        try:
+            non_silent_intervals = librosa.effects.split(audio, top_db=20)
+            total_non_silent = sum((end - start) for start, end in non_silent_intervals)
+            duration = float(total_non_silent) / self.sample_rate
+        except Exception:
+            duration = float(len(audio)) / self.sample_rate
+
         self.references.append({
             'name': word_name,
             'mfcc_mean': mfcc_mean,
             'mfcc_std': mfcc_std,
+            'duration': duration,
             'filename': filename
         })
         print(f"Reference word '{word_name}' added with MFCC shape: {mfcc_mean.shape}")

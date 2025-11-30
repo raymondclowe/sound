@@ -26,7 +26,12 @@ class Recogniser:
                         pass
         except Exception as e:
             print(f"[DEBUG] Exception during Recogniser cleanup: {e}")
-        # Removed close_stt_session import and call (unknown symbol)
+        # Close STT session - do not assume function exists, call safely
+        try:
+            from sound_recognition.transcription import close_stt_session
+            close_stt_session()
+        except Exception:
+            pass
     def __init__(self,
                  wakewordstrings=None,
                  wakewordreferenceaudios=None,
@@ -45,7 +50,8 @@ class Recogniser:
                  min_trailing_silence=0.15,
                  max_audio_duration=2.0,
                  allowed_other_words=None,
-                 padding=0.05):
+                 padding=0.05,
+                 auto_sound_from_reference: bool = True):
         self.target_words = wakewordstrings or []
         self.wordsminmax = wordsminmax
         self.threshold = threshold
@@ -69,6 +75,19 @@ class Recogniser:
             for i, ref in enumerate(wakewordreferenceaudios):
                 name = (wakewordstrings[i] if wakewordstrings and i < len(wakewordstrings) else f"target_{i+1}")
                 self.matcher.load_reference_from_file(ref, word_name=name)
+        # Auto-calc sound thresholds based on reference durations (non-silent parts)
+        if auto_sound_from_reference and self.matcher.references:
+            durations = [r.get('duration') for r in self.matcher.references if r.get('duration')]
+            if durations:
+                min_ref = min(durations)
+                max_ref = max(durations)
+                # Adjust min/max sound if default values used
+                self.min_sound = max(0.05, min_ref * 0.6)
+                self.max_sound = max(self.min_sound + 0.1, max_ref * 1.6)
+                # Adjust words range based on expected duration (rough heuristic)
+                suggested_max_words = max(3, int(round(max_ref * 2.0)) + 1)
+                if self.wordsminmax == (1, 3):
+                    self.wordsminmax = (1, suggested_max_words)
         # Cache STT IP once
         from .transcription import resolve_stt_ip, STT_PORT
         stt_ip = resolve_stt_ip()
@@ -134,7 +153,7 @@ class Recogniser:
                             if self.debug_playback:
                                 sd.play(word_audio, SoundBuffer.FREQUENCY)
                                 sd.wait()
-                            prompt = f"We are looking for the Wake word alone or in a short phrase, the wakeword today is : {best_name}" if best_name else "Wake word: computer"
+                            prompt = f"Wake word : {best_name} " if best_name else "Wake word: computer"
                             transcription = transcribe_audio(word_audio, SoundBuffer.FREQUENCY, stt_url=self.stt_url, prompt=prompt, model=self.whispermodel)
                             if transcription:
                                 import re

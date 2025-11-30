@@ -89,7 +89,9 @@ def main():
         threshold=75,
         device=int(1),
         debug='--debug' in sys.argv,
-        debug_playback=False
+        debug_playback=False,
+        allowed_other_words=["ok", "okay", "activate", "please", "hey", "hello", "hi"],
+        auto_sound_from_reference=True,
     )
 
     print("Listening for wake word... (Ctrl+C to exit)")
