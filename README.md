@@ -34,6 +34,23 @@ sound-demo --debug
 
 ### How to use in your own code
 
+```python
+from sound_recognition.recogniser import Recogniser
+
+recogniser = Recogniser(
+	wakewordstrings=["computer", "computer", "computer"],
+	wakewordreferenceaudios=["examples/example_computer_male.wav", "examples/example_computer_female.wav", "examples/example_computer_male_teen.wav"],
+	threshold=75,
+	auto_sound_from_reference=True,
+	stt_minscore=85.0,  # min score for STT
+	stt_async=False,    # run STT synchronously by default
+	allowed_other_words=["ok", "activate", "please", "hey"],
+)
+
+res = recogniser.waitforit()
+if res:
+	print("Detected:", res)
+```
 
 
 ### Next Steps

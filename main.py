@@ -84,8 +84,8 @@ def main():
 
     # Create recogniser object
     recogniser = Recogniser(
-        wakewordstrings=["computer", "computer"],
-        wakewordreferenceaudios=["example_computer_male.wav", "example_computer_female..wav"],
+        wakewordstrings=["computer", "computer", "computer"],
+        wakewordreferenceaudios=["examples/example_computer_male.wav", "examples/example_computer_female.wav", "examples/example_computer_male_teen.wav"],
         threshold=75,
         device=int(1),
         debug='--debug' in sys.argv,

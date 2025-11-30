@@ -51,7 +51,9 @@ class Recogniser:
                  max_audio_duration=2.0,
                  allowed_other_words=None,
                  padding=0.05,
-                 auto_sound_from_reference: bool = True):
+                 auto_sound_from_reference: bool = True,
+                 stt_minscore: float = 85.0,
+                 stt_async: bool = False):
         self.target_words = wakewordstrings or []
         self.wordsminmax = wordsminmax
         self.threshold = threshold
@@ -69,6 +71,8 @@ class Recogniser:
         self.max_audio_duration = max_audio_duration
         self.allowed_other_words = allowed_other_words if allowed_other_words is not None else []
         self.padding = padding
+        self.stt_minscore = stt_minscore
+        self.stt_async = stt_async
         self.matcher = WordMatcher(sample_rate=16000)
         # Load multiple reference audios
         if wakewordreferenceaudios:
@@ -149,12 +153,22 @@ class Recogniser:
                         audio_rms = np.sqrt(np.mean(word_audio**2))
                         audio_max = np.max(np.abs(word_audio))
                         print(f"[Best match: {best_name} {best_score:.1f} | All: {all_scores} | RMS={audio_rms:.4f} Max={audio_max:.4f}]", end=" ")
-                        if best_score >= self.threshold:
+                        if best_score >= self.threshold and best_score >= self.stt_minscore:
                             if self.debug_playback:
                                 sd.play(word_audio, SoundBuffer.FREQUENCY)
                                 sd.wait()
                             prompt = f"Wake word : {best_name} " if best_name else "Wake word: computer"
-                            transcription = transcribe_audio(word_audio, SoundBuffer.FREQUENCY, stt_url=self.stt_url, prompt=prompt, model=self.whispermodel)
+                            if self.stt_async:
+                                import threading
+                                def _async_transcribe(audio, prompt):
+                                    t = transcribe_audio(audio, SoundBuffer.FREQUENCY, stt_url=self.stt_url, prompt=prompt, model=self.whispermodel)
+                                    if t:
+                                        # For async mode, still log and print
+                                        print(f"[ASYNC STT] {t}")
+                                threading.Thread(target=_async_transcribe, args=(word_audio, prompt), daemon=True).start()
+                                transcription = None
+                            else:
+                                transcription = transcribe_audio(word_audio, SoundBuffer.FREQUENCY, stt_url=self.stt_url, prompt=prompt, model=self.whispermodel)
                             if transcription:
                                 import re
                                 words = [re.sub(r'[^a-z0-9]', '', w) for w in transcription.strip().lower().rstrip('.,!?;:').split()]
