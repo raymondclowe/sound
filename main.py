@@ -64,6 +64,44 @@ def play_confirmation_chime():
     sd.wait()
 
 
+def test_microphone_level(device_id, duration=3):
+    """Test microphone and show live level meter."""
+    print(f"\nTesting device {device_id} for {duration} seconds...")
+    print("Please speak or make noise!")
+    print("Level: ", end="", flush=True)
+    
+    recorded_data = []
+    
+    def callback(indata, frames, time, status):
+        # Take only first channel from multi-channel input
+        audio = indata[:, 0] if indata.ndim > 1 else indata.flatten()
+        recorded_data.append(audio.copy())
+        rms = np.sqrt(np.mean(audio**2))
+        max_val = np.max(np.abs(audio))
+        # Show visual level meter
+        bar_length = int(rms * 100)
+        print(f"\rLevel: {'█' * min(bar_length, 50)} RMS={rms:.4f} Max={max_val:.4f}", end="", flush=True)
+    
+    try:
+        dev_info = sd.query_devices(device_id)
+        channels = dev_info['max_input_channels']
+        with sd.InputStream(samplerate=16000, channels=channels, callback=callback, device=device_id):
+            sd.sleep(int(duration * 1000))
+        print()  # newline
+        
+        # Play back what was recorded
+        if recorded_data:
+            all_audio = np.concatenate(recorded_data)
+            print(f"\nPlayback of recorded audio ({len(all_audio)/16000:.1f}s)...")
+            sd.play(all_audio, 16000)
+            sd.wait()
+            print("Playback complete.\n")
+            return all_audio
+    except Exception as e:
+        print(f"\nError testing device: {e}")
+        return None
+
+
 def list_audio_devices():
     """List all available audio input devices."""
     print("\nAvailable audio input devices:")
@@ -95,11 +133,31 @@ class SoundBuffer:
         self.buffer_length = self.buffer_seconds * SoundBuffer.FREQUENCY
         self.data = np.zeros(self.buffer_length)
         self.samples_collected = 0
+        # Determine number of channels for the selected device, with fallback
+        channels = 1
+        selected_device = device
+        if device is not None:
+            try:
+                dev_info = sd.query_devices(device)
+                channels = dev_info['max_input_channels']
+                if channels < 1:
+                    channels = 1
+            except Exception as e:
+                print(f"Warning: Could not query device {device}: {e}. Falling back to default device.")
+                selected_device = None
+                try:
+                    dev_info = sd.query_devices(None, 'input')
+                    channels = dev_info['max_input_channels']
+                    if channels < 1:
+                        channels = 1
+                except Exception as e2:
+                    print(f"Warning: Could not query default input device: {e2}. Using 1 channel.")
+                    channels = 1
         self.sd_stream = sd.InputStream(
-            samplerate=16000, 
-            channels=1, 
+            samplerate=16000,
+            channels=channels,
             callback=self.add_sound_to_buffer,
-            device=device
+            device=selected_device
         )
         self.sd_stream.start()
 
@@ -122,7 +180,11 @@ class SoundBuffer:
         return silent_frames
         
     def add_sound_to_buffer(self, indata, frames, time, status):
-        new_data = np.array(indata).flatten() # flatten to 1D array as we have mono data here
+        # Take only first channel if multi-channel input
+        if indata.ndim > 1:
+            new_data = indata[:, 0].flatten()
+        else:
+            new_data = np.array(indata).flatten()
         if self.frame_size == 0:
             self.frame_size = len(new_data)
         
@@ -336,7 +398,11 @@ def transcribe_audio(audio_samples, sample_rate=16000, stt_url=None, prompt=None
             server_duration = result.get('duration_s', 0)
             if server_duration > 0:
                 print(f" [Server model: {server_duration*1000:.1f}ms]", end="")
-            return result.get('text', '').strip()
+            text = result.get('text', '').strip()
+            if not text:
+                print("\n[DEBUG] STT server response had empty or missing 'text' field:")
+                print(result)
+            return text
         else:
             print(f"STT API error: {response.status_code}")
             if response.text:
@@ -427,15 +493,29 @@ def main():
     RECORD_REFERENCE = False
     TARGET_WORD = None
     MICROPHONE_DEVICE = None  # None = default, or set to device index
+    DEBUG_PLAYBACK = False  # Set to True to hear captured audio before STT
     
     # List available microphones
     list_audio_devices()
     
     # Optionally select microphone
     try:
-        device_input = input("Enter microphone device number (or press Enter for default): ").strip()
-        if device_input:
+        device_input = input("Enter microphone device number (or 't' to test, or Enter for default): ").strip()
+        if device_input.lower() == 't':
+            # Test mode
+            test_device = input("Enter device number to test: ").strip()
+            if test_device:
+                test_audio = test_microphone_level(int(test_device), duration=5)
+                response = input("Use this device? (y/n): ").strip().lower()
+                if response == 'y':
+                    MICROPHONE_DEVICE = int(test_device)
+                    print(f"Using device {MICROPHONE_DEVICE}\n")
+                else:
+                    print("Using default microphone\n")
+        elif device_input:
             MICROPHONE_DEVICE = int(device_input)
+            print(f"Testing device {MICROPHONE_DEVICE}...")
+            test_microphone_level(MICROPHONE_DEVICE, duration=3)
             print(f"Using device {MICROPHONE_DEVICE}\n")
         else:
             print("Using default microphone\n")
@@ -653,9 +733,21 @@ def main():
                     matches, similarity = matcher.matches(word_audio, threshold=SIMILARITY_THRESHOLD)
                     mfcc_time = time.time() - mfcc_start_time
                     
+                    # Calculate audio stats for debugging
+                    audio_rms = np.sqrt(np.mean(word_audio**2))
+                    audio_max = np.max(np.abs(word_audio))
+                    
                     print(f"[Timing] Extract: {extract_time*1000:.1f}ms, MFCC: {mfcc_time*1000:.1f}ms", end="")
+                    print(f" [Audio: RMS={audio_rms:.4f}, Max={audio_max:.4f}, Sim={similarity:.1f}]", end="")
                     
                     if matches:
+                        # Optional debug playback
+                        if DEBUG_PLAYBACK:
+                            print(f" - PLAYING ({audio_duration:.2f}s)...", end="", flush=True)
+                            sd.play(word_audio, SoundBuffer.FREQUENCY)
+                            sd.wait()
+                            print(" DONE", end="")
+                        
                         # Send to STT for confirmation
                         stt_start_time = time.time()
                         prompt = f"Wake word: {TARGET_WORD}" if TARGET_WORD else "Wake word: computer"
@@ -677,6 +769,11 @@ def main():
                         else:
                             print(f"? MATCH - STT failed")
                     else:
+                        # Optional debug playback for non-matches
+                        if DEBUG_PLAYBACK:
+                            print(f" - PLAYING NON-MATCH ({audio_duration:.2f}s)...", end="", flush=True)
+                            sd.play(word_audio, SoundBuffer.FREQUENCY)
+                            sd.wait()
                         print()  # Newline for timing output
                     
                     state = 'waiting'
