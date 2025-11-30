@@ -40,8 +40,19 @@ def resolve_stt_ip(hostname: Optional[str] = None) -> str:
         return hostname  # fallback to hostname if resolution fails
 
 
+
+
+# Cache resolved STT IP so it is only resolved once
+_stt_ip_cache = None
 # Create a session for connection reuse
 _stt_session = requests.Session()
+
+def close_stt_session():
+    """Explicitly close the STT requests session (call at shutdown if needed)."""
+    global _stt_session
+    if _stt_session is not None:
+        _stt_session.close()
+        _stt_session = None
 
 
 def transcribe_audio(
@@ -69,9 +80,11 @@ def transcribe_audio(
         >>> text = transcribe_audio(audio, sample_rate=sr, model="base")
         >>> print(text)
     """
+    global _stt_ip_cache
     if stt_url is None:
-        stt_ip = resolve_stt_ip()
-        stt_url = f"http://{stt_ip}:{STT_PORT}"
+        if _stt_ip_cache is None:
+            _stt_ip_cache = resolve_stt_ip()
+        stt_url = f"http://{_stt_ip_cache}:{STT_PORT}"
     
     try:
         prep_start = time.time()

@@ -59,7 +59,11 @@ def test_microphone_level(device_id, duration=3):
         print(f"\rLevel: {'█' * min(bar_length, 50)} RMS={rms:.4f} Max={max_val:.4f}", end="", flush=True)
     try:
         dev_info = sd.query_devices(device_id)
-        channels = int(getattr(dev_info, 'max_input_channels', dev_info.get('max_input_channels', 1) if isinstance(dev_info, dict) else 1))
+        # Use .get for dict access to avoid type errors
+        if isinstance(dev_info, dict):
+            channels = int(dev_info.get('max_input_channels', 1))
+        else:
+            channels = int(getattr(dev_info, 'max_input_channels', 1))
         with sd.InputStream(samplerate=16000, channels=channels, callback=callback, device=device_id):
             sd.sleep(int(duration * 1000))
         print()
@@ -81,15 +85,16 @@ def list_audio_devices():
     print("="*60)
     devices = sd.query_devices()
     found = False
-    for i, device in enumerate(devices):
-        try:
-            max_in_val = int(device['max_input_channels'])
-        except Exception:
-            continue
-        if max_in_val > 0:
-            found = True
-            name = device['name']
-            print(f"{i}: {name} (channels: {max_in_val})")
+        for i, device in enumerate(devices):
+            if isinstance(device, dict):
+                max_in_val = int(device.get('max_input_channels', 0))
+                name = device.get('name', str(i))
+            else:
+                max_in_val = int(getattr(device, 'max_input_channels', 0))
+                name = getattr(device, 'name', str(i))
+            if max_in_val > 0:
+                found = True
+                print(f"{i}: {name} (channels: {max_in_val})")
     if not found:
         print("[DEBUG] No input devices found with >0 channels. Full device list:")
         for i, device in enumerate(devices):
@@ -130,7 +135,7 @@ def main():
 
     # Create recogniser object
     recogniser = Recogniser(
-        wakewordstrings=["male", "female"],
+        wakewordstrings=["computer", "computer"],
         wakewordreferenceaudios=["example_computer_male.wav", "example_computer_female..wav"],
         threshold=75,
         device=int(1),
