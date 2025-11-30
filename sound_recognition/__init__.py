@@ -23,8 +23,15 @@ STT_HOSTNAME = "tc3.local"
 STT_PORT = 8085
 
 
-def resolve_stt_ip(hostname=None, port=None):
-    """Resolve hostname to IP at startup (internal DNS cache)."""
+def resolve_stt_ip(hostname=None):
+    """Resolve hostname to IP at startup (internal DNS cache).
+    
+    Args:
+        hostname: The hostname to resolve. If None, uses STT_HOSTNAME.
+        
+    Returns:
+        The resolved IP address, or the original hostname if resolution fails.
+    """
     if hostname is None:
         hostname = STT_HOSTNAME
     try:
@@ -257,7 +264,12 @@ class SoundBuffer:
                 self.silence_threshold = max(new_threshold, self.MIN_THRESHOLD)
             
     def is_silent(self):
-        """Check if the current audio is silent."""
+        """Check if the current audio is silent.
+        
+        Returns:
+            bool: True if the current audio level is below the silence threshold,
+                  False otherwise.
+        """
         if len(self.data) == 0 or self.frame_size == 0:
             return True
         # Get the most recent frame
@@ -268,7 +280,14 @@ class SoundBuffer:
         return rms < self.silence_threshold
     
     def return_last_n_seconds(self, n):
-        """Return the last n seconds of audio with wrap around if needed."""
+        """Return the last n seconds of audio with wrap around if needed.
+        
+        Args:
+            n: Number of seconds of audio to return (float).
+            
+        Returns:
+            numpy.ndarray: Array of audio samples from the last n seconds.
+        """
         n_samples = int(n * SoundBuffer.FREQUENCY)
         if n_samples > len(self.data):
             n_samples = len(self.data)
