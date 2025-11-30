@@ -1,32 +1,36 @@
+"""
+Sound Wake Word Detection - Proof of Concept
+
+This POC demonstrates the sound_recognition module capabilities including:
+- Real-time audio capture and silence detection
+- MFCC-based word matching for wake word detection
+- Integration with external speech-to-text (STT) engines
+
+The core identification and recognition logic is in the sound_recognition module.
+"""
+
 import numpy as np
 import sounddevice as sd
 import time
-import librosa
-from scipy.spatial.distance import cosine
 import os
-import base64
-import io
-import requests
 import socket
+import requests
 
-# --- Static configuration ---
-STT_HOSTNAME = "tc3.local"
-STT_PORT = 8085
+# Import core functionality from the sound_recognition module
+from sound_recognition import (
+    SoundBuffer,
+    WordMatcher,
+    transcribe_audio,
+    resolve_stt_ip,
+    STT_HOSTNAME,
+    STT_PORT,
+)
 
-# Resolve hostname to IP at startup (internal DNS cache)
-def resolve_stt_ip():
-    try:
-        ip = socket.gethostbyname(STT_HOSTNAME)
-        print(f"Resolved {STT_HOSTNAME} to {ip}")
-        return ip
-    except Exception as e:
-        print(f"Failed to resolve {STT_HOSTNAME}: {e}")
-        return STT_HOSTNAME  # fallback to hostname if resolution fails
-
+# Resolve STT IP at startup for this POC
 STT_IP = resolve_stt_ip()
 STT_URL = f"http://{STT_IP}:{STT_PORT}"
 
-# Create a session for connection reuse
+# Create a session for connection reuse (for benchmark functions)
 stt_session = requests.Session()
 
 
@@ -112,358 +116,6 @@ def list_audio_devices():
             print(f"{i}: {device['name']} (channels: {device['max_input_channels']})")
     print("="*60 + "\n")
     return devices
-
-
-# define sound buffer class, where is is a numpy array
-class SoundBuffer:
-    
-    frame_size = 0
-    buffer_length = 0 # in samples
-    buffer_seconds = 0
-    sd_stream = None
-    data = None
-    pointer = 0 # current position in buffer (in samples)
-    silence_threshold = 0.01
-    FREQUENCY = 16000
-    MIN_THRESHOLD = 0.005  # Minimum threshold to prevent going to 0
-    samples_collected = 0
-    
-    def __init__(self, seconds=10, device=None):
-        self.buffer_seconds = seconds
-        self.buffer_length = self.buffer_seconds * SoundBuffer.FREQUENCY
-        self.data = np.zeros(self.buffer_length)
-        self.samples_collected = 0
-        # Determine number of channels for the selected device, with fallback
-        channels = 1
-        selected_device = device
-        if device is not None:
-            try:
-                dev_info = sd.query_devices(device)
-                channels = dev_info['max_input_channels']
-                if channels < 1:
-                    channels = 1
-            except Exception as e:
-                print(f"Warning: Could not query device {device}: {e}. Falling back to default device.")
-                selected_device = None
-                try:
-                    dev_info = sd.query_devices(None, 'input')
-                    channels = dev_info['max_input_channels']
-                    if channels < 1:
-                        channels = 1
-                except Exception as e2:
-                    print(f"Warning: Could not query default input device: {e2}. Using 1 channel.")
-                    channels = 1
-        self.sd_stream = sd.InputStream(
-            samplerate=16000,
-            channels=channels,
-            callback=self.add_sound_to_buffer,
-            device=selected_device
-        )
-        self.sd_stream.start()
-
-    def stop(self):
-        self.sd_stream.stop()
-        
-    def start(self):
-        self.sd_stream.start()
-        
-    def silent_frames(self): # returns all the frames which by current definitions are silent, that is their average values are below the threshold
-        if self.frame_size == 0 or len(self.data) < self.frame_size:
-            return []
-        silent_frames = []
-        num_frames = len(self.data) // self.frame_size
-        for i in range(num_frames):
-            frame = self.data[i*self.frame_size:(i+1)*self.frame_size]
-            rms = np.sqrt(np.mean(frame**2))
-            if rms < self.silence_threshold:
-                silent_frames.append(i)
-        return silent_frames
-        
-    def add_sound_to_buffer(self, indata, frames, time, status):
-        # Take only first channel if multi-channel input
-        if indata.ndim > 1:
-            new_data = indata[:, 0].flatten()
-        else:
-            new_data = np.array(indata).flatten()
-        if self.frame_size == 0:
-            self.frame_size = len(new_data)
-        
-        # Add new data to circular buffer
-        for sample in new_data:
-            self.data[self.pointer] = sample
-            self.pointer = (self.pointer + 1) % self.buffer_length
-            if self.samples_collected < self.buffer_length:
-                self.samples_collected += 1
-            
-        # Only start adjusting threshold after we have enough data
-        if self.samples_collected < self.buffer_length:
-            return
-            
-        # adjust silence threshold dynamically by setting it to just above the average of silent_frames()
-        silent_frames = self.silent_frames()
-        if len(silent_frames) > 0:
-            silent_values = []
-            for i in silent_frames:
-                frame = self.data[i*self.frame_size:(i+1)*self.frame_size]
-                rms = np.sqrt(np.mean(frame**2))
-                silent_values.append(rms)
-            new_threshold = np.mean(silent_values) * 1.5  # set threshold to 150% of average silent frame value
-            self.silence_threshold = max(new_threshold, self.MIN_THRESHOLD)  # Ensure minimum threshold
-        else:
-            # If no silent frames found, use a percentile of all frames
-            num_frames = len(self.data) // self.frame_size
-            all_rms = []
-            for i in range(num_frames):
-                frame = self.data[i*self.frame_size:(i+1)*self.frame_size]
-                rms = np.sqrt(np.mean(frame**2))
-                all_rms.append(rms)
-            if len(all_rms) > 0:
-                # Use 25th percentile as silence threshold
-                new_threshold = np.percentile(all_rms, 25) * 1.2
-                self.silence_threshold = max(new_threshold, self.MIN_THRESHOLD)
-            
-    def is_silent(self):
-        if len(self.data) == 0 or self.frame_size == 0:
-            return True
-        # Get the most recent frame
-        recent_samples = self.return_last_n_seconds(0.1)  # Check last 100ms
-        if len(recent_samples) == 0:
-            return True
-        rms = np.sqrt(np.mean(recent_samples**2))
-        return rms < self.silence_threshold
-    
-    def return_last_n_seconds(self, n): # with wrap around if needed
-        n_samples = int(n * SoundBuffer.FREQUENCY)
-        if n_samples > len(self.data):
-            n_samples = len(self.data)
-        if n_samples == 0:
-            return np.array([])
-        
-        start_index = (self.pointer - n_samples) % self.buffer_length
-        if start_index < self.pointer:
-            return self.data[start_index:self.pointer]
-        else:
-            return np.concatenate((self.data[start_index:], self.data[:self.pointer]))
-        
-
-class WordMatcher:
-    """Matches audio clips using MFCC (Mel-Frequency Cepstral Coefficients) similarity."""
-    
-    def __init__(self, sample_rate=16000):
-        self.sample_rate = sample_rate
-        self.reference_mfcc_mean = None
-        self.reference_mfcc_std = None
-        self.reference_word = None
-        
-    def extract_mfcc(self, audio):
-        """Extract MFCC features from audio with more discriminative power."""
-        # Extract 20 MFCC coefficients (more detailed)
-        mfcc = librosa.feature.mfcc(y=audio, sr=self.sample_rate, n_mfcc=20, n_fft=512, hop_length=160)
-        
-        # Use both mean and std deviation for better discrimination
-        mfcc_mean = np.mean(mfcc, axis=1)
-        mfcc_std = np.std(mfcc, axis=1)
-        
-        return mfcc_mean, mfcc_std
-    
-    def set_reference(self, audio, word_name="target"):
-        """Set the reference word to match against."""
-        self.reference_word = word_name
-        self.reference_mfcc_mean, self.reference_mfcc_std = self.extract_mfcc(audio)
-        print(f"Reference word '{word_name}' set with MFCC shape: {self.reference_mfcc_mean.shape}")
-        
-    def load_reference_from_file(self, filepath, word_name="target"):
-        """Load reference word from audio file."""
-        audio, sr = librosa.load(filepath, sr=self.sample_rate)
-        self.set_reference(audio, word_name)
-        
-    def save_reference(self, filepath, audio):
-        """Save reference audio to file."""
-        import soundfile as sf
-        sf.write(filepath, audio, self.sample_rate)
-        print(f"Reference saved to {filepath}")
-        
-    def calculate_similarity(self, audio):
-        """
-        Calculate similarity between audio and reference word.
-        Returns similarity score (0-100, higher is more similar).
-        Uses both mean and std of MFCCs for better discrimination.
-        """
-        if self.reference_mfcc_mean is None:
-            raise ValueError("No reference word set. Call set_reference() first.")
-        
-        # Extract MFCC from candidate audio
-        candidate_mfcc_mean, candidate_mfcc_std = self.extract_mfcc(audio)
-        
-        # Calculate cosine similarity for both mean and std
-        sim_mean = 1 - cosine(self.reference_mfcc_mean, candidate_mfcc_mean)
-        sim_std = 1 - cosine(self.reference_mfcc_std, candidate_mfcc_std)
-        
-        # Combine similarities (mean is more important)
-        combined_similarity = (sim_mean * 0.7 + sim_std * 0.3)
-        
-        # Scale to 0-100 for better readability and apply non-linear scaling
-        # This spreads out the scores to create more separation
-        similarity_percent = combined_similarity * 100
-        
-        # Apply exponential scaling to amplify differences
-        # This makes high scores higher and low scores lower
-        scaled_similarity = (similarity_percent ** 1.5) / (100 ** 0.5)
-        
-        return scaled_similarity
-    
-    def matches(self, audio, threshold=75):
-        """
-        Check if audio matches reference word.
-        
-        Args:
-            audio: Audio samples to check
-            threshold: Similarity threshold (0-100). Default 75 for good separation.
-                      Typical good matches: 85-100
-                      Typical non-matches: 60-80
-        
-        Returns:
-            (matches: bool, similarity: float)
-        """
-        similarity = self.calculate_similarity(audio)
-        return similarity >= threshold, similarity
-
-
-def transcribe_audio(audio_samples, sample_rate=16000, stt_url=None, prompt=None, model="tiny"):
-    if stt_url is None:
-        stt_url = STT_URL
-    """
-    Send audio to STT engine and get transcription.
-    
-    Args:
-        audio_samples: numpy array of audio samples
-        sample_rate: sample rate of audio
-        stt_url: URL of the transcription service
-        prompt: Optional hint text to guide transcription
-        model: Whisper model to use (tiny, base, small, medium, large)
-        
-    Returns:
-        transcription text or None if failed
-    """
-    try:
-        prep_start = time.time()
-        
-        # Normalize and boost audio before sending
-        # Remove DC offset
-        audio_samples = audio_samples - np.mean(audio_samples)
-        
-        # Normalize to use full dynamic range
-        max_val = np.max(np.abs(audio_samples))
-        if max_val > 0:
-            audio_samples = audio_samples / max_val
-            
-        # Apply moderate boost (increase volume by 50%)
-        audio_samples = audio_samples * 1.5
-        
-        # Clip to prevent distortion
-        audio_samples = np.clip(audio_samples, -1.0, 1.0)
-        
-        # Convert audio to WAV format in memory
-        import soundfile as sf
-        buffer = io.BytesIO()
-        sf.write(buffer, audio_samples, sample_rate, format='WAV')
-        buffer.seek(0)
-        
-        prep_time = time.time() - prep_start
-        
-        # Use multipart/form-data for mini_transcriber
-        files = {'file': ('audio.wav', buffer, 'audio/wav')}
-        data = {
-            'model': model,
-            'language': 'en'
-        }
-        if prompt:
-            data['initial_prompt'] = prompt
-        
-        # Send to STT API
-        network_start = time.time()
-        response = stt_session.post(
-            f"{stt_url}/transcribe",
-            files=files,
-            data=data,
-            timeout=10
-        )
-        network_time = time.time() - network_start
-        
-        print(f" [Prep: {prep_time*1000:.1f}ms, Network: {network_time*1000:.1f}ms]", end="")
-        
-        if response.status_code == 200:
-            result = response.json()
-            # Server reports its own duration
-            server_duration = result.get('duration_s', 0)
-            if server_duration > 0:
-                print(f" [Server model: {server_duration*1000:.1f}ms]", end="")
-            text = result.get('text', '').strip()
-            if not text:
-                print("\n[DEBUG] STT server response had empty or missing 'text' field:")
-                print(result)
-            return text
-        else:
-            print(f"STT API error: {response.status_code}")
-            if response.text:
-                print(f"Response: {response.text}")
-            return None
-            
-    except Exception as e:
-        print(f"Transcription failed: {e}")
-        return None
-
-
-# Commented out: Whisper CPP version for comparison
-"""
-def transcribe_audio_whisper_cpp(audio_samples, sample_rate=16000, stt_url=None, prompt=None, model="tiny"):
-    if stt_url is None:
-        stt_url = STT_URL
-    try:
-        prep_start = time.time()
-        
-        # Convert audio to WAV format in memory (minimal processing)
-        import soundfile as sf
-        buffer = io.BytesIO()
-        sf.write(buffer, audio_samples, sample_rate, format='WAV')
-        buffer.seek(0)
-        
-        prep_time = time.time() - prep_start
-        
-        # Use multipart/form-data for new Whisper CPP endpoint
-        files = {'file': ('audio.wav', buffer, 'audio/wav')}
-        data = {
-            'temperature': '0.0',
-            'temperature_inc': '0.2',
-            'response_format': 'json'
-        }
-        
-        # Send to STT API
-        network_start = time.time()
-        response = stt_session.post(
-            f"{stt_url}/inference",
-            files=files,
-            data=data,
-            timeout=10
-        )
-        network_time = time.time() - network_start
-        
-        print(f" [Prep: {prep_time*1000:.1f}ms, Network: {network_time*1000:.1f}ms]", end="")
-        
-        if response.status_code == 200:
-            result = response.json()
-            # Assuming the response has 'text' field
-            return result.get('text', '').strip()
-        else:
-            print(f"STT API error: {response.status_code}")
-            if response.text:
-                print(f"Response: {response.text}")
-            return None
-            
-    except Exception as e:
-        print(f"Transcription failed: {e}")
-        return None
-"""
 
 
 def benchmark_dns(hostname):
