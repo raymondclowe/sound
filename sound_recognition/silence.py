@@ -40,7 +40,7 @@ class SoundBuffer:
     buffer_length = 0  # in samples
     buffer_seconds = 0
     sd_stream = None
-    data = None
+    data: np.ndarray
     pointer = 0  # current position in buffer (in samples)
     silence_threshold = 0.02  # Higher initial threshold for more robust detection
     FREQUENCY = 16000
@@ -91,11 +91,13 @@ class SoundBuffer:
 
     def stop(self) -> None:
         """Stop the audio input stream."""
-        self.sd_stream.stop()
+        if self.sd_stream is not None:
+            self.sd_stream.stop()
         
     def start(self) -> None:
         """Start the audio input stream."""
-        self.sd_stream.start()
+        if self.sd_stream is not None:
+            self.sd_stream.start()
         
     def silent_frames(self) -> List[int]:
         """
@@ -104,7 +106,7 @@ class SoundBuffer:
         Returns:
             list: List of frame indices that are considered silent.
         """
-        if self.frame_size == 0 or len(self.data) < self.frame_size:
+        if self.frame_size == 0 or self.data is None or len(self.data) < self.frame_size:
             return []
         silent_frames = []
         num_frames = len(self.data) // self.frame_size
@@ -178,7 +180,7 @@ class SoundBuffer:
         Returns:
             bool: True if the current audio level is below the silence threshold.
         """
-        if len(self.data) == 0 or self.frame_size == 0:
+        if self.data is None or len(self.data) == 0 or self.frame_size == 0:
             if getattr(self, 'debug', False):
                 print("[DEBUG is_silent] No data or frame size 0, returning True")
             return True
@@ -204,11 +206,12 @@ class SoundBuffer:
             numpy.ndarray: Audio samples from the last n seconds.
         """
         n_samples = int(n * SoundBuffer.FREQUENCY)
+        if self.data is None:
+            return np.array([])
         if n_samples > len(self.data):
             n_samples = len(self.data)
         if n_samples == 0:
             return np.array([])
-        
         start_index = (self.pointer - n_samples) % self.buffer_length
         if start_index < self.pointer:
             return self.data[start_index:self.pointer]
