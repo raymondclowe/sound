@@ -140,8 +140,9 @@ def transcribe_audio(
                 print(f" [Server model: {server_duration*1000:.1f}ms]", end="")
             text = result.get('text', '').strip()
             if not text:
-                print("\n[DEBUG] STT server response had empty or missing 'text' field:")
-                print(result)
+                from .utils import debug_print
+                debug_print("\n[DEBUG] STT server response had empty or missing 'text' field:", debug=True)
+                debug_print(str(result), debug=True)
             return text
         else:
             print(f"STT API error: {response.status_code}")

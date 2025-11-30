@@ -240,9 +240,10 @@ def list_audio_devices():
             found = True
             print(f"{i}: {name} (channels: {max_in_val})")
     if not found:
-        print("[DEBUG] No input devices found with >0 channels. Full device list:")
+        from .utils import debug_print
+        debug_print("[DEBUG] No input devices found with >0 channels. Full device list:", debug=True)
         for i, device in enumerate(devices):
-            print(f"{i}: {device}")
+            debug_print(f"{i}: {device}", debug=True)
     print("=" * 60 + "\n")
     return devices
 

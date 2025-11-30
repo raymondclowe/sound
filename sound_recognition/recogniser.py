@@ -4,6 +4,7 @@ import time
 import os
 import requests
 from .matching import WordMatcher
+from .utils import debug_print
 from .silence import SoundBuffer
 from .transcription import transcribe_audio, resolve_stt_ip, STT_HOSTNAME, STT_PORT
 
@@ -84,7 +85,7 @@ class Recogniser:
             is_currently_silent = self.soundBuffer.is_silent()
             current_time = time.time()
             if self.debug:
-                print(f"[DEBUG] State: {state}, SilenceThresh: {getattr(self.soundBuffer, 'silence_threshold', None):.4f}")
+                debug_print(f"[DEBUG] State: {state}, SilenceThresh: {getattr(self.soundBuffer, 'silence_threshold', None):.4f}", debug=self.debug)
             prev_state = state
             if state == 'waiting':
                 if is_currently_silent:
@@ -162,5 +163,5 @@ class Recogniser:
                                 sd.wait()
                         state = 'waiting'
             if self.debug and prev_state != state:
-                print(f"[DEBUG] State transition: {prev_state} -> {state}")
+                debug_print(f"[DEBUG] State transition: {prev_state} -> {state}", debug=self.debug)
         return None
