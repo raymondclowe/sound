@@ -19,7 +19,13 @@ class Recogniser:
                  timeout=30,
                  device=None,
                  debug=False,
-                 debug_playback=False):
+                 debug_playback=False,
+                 min_silence_before=1.0,
+                 min_sound=0.5,
+                 max_sound=1.5,
+                 min_trailing_silence=0.5,
+                 max_audio_duration=3.0,
+                 padding=0.05):
         self.wakewordstring = wakewordstring
         self.wakewordreferenceaudio = wakewordreferenceaudio
         self.wordsminmax = wordsminmax
@@ -31,6 +37,12 @@ class Recogniser:
         self.device = device
         self.debug = debug
         self.debug_playback = debug_playback
+        self.min_silence_before = min_silence_before
+        self.min_sound = min_sound
+        self.max_sound = max_sound
+        self.min_trailing_silence = min_trailing_silence
+        self.max_audio_duration = max_audio_duration
+        self.padding = padding
         self.soundBuffer = SoundBuffer(seconds=10, device=device, debug=debug)
         self.matcher = WordMatcher(sample_rate=SoundBuffer.FREQUENCY)
         self.target_word = None
@@ -70,54 +82,46 @@ class Recogniser:
             sd.sleep(100)
             is_currently_silent = self.soundBuffer.is_silent()
             current_time = time.time()
-            
             if state == 'waiting':
                 if is_currently_silent:
                     state = 'in_silence'
                     silence_start_time = current_time
-                    
             elif state == 'in_silence':
                 if not is_currently_silent:
                     silence_duration = current_time - silence_start_time
-                    if silence_duration >= 1.0:
+                    if silence_duration >= self.min_silence_before:
                         state = 'in_sound'
                         sound_start_time = current_time
                     else:
                         state = 'waiting'
-                        
             elif state == 'in_sound':
                 if not is_currently_silent:
                     sound_duration = current_time - sound_start_time
-                    if sound_duration > 1.5:
+                    if sound_duration > self.max_sound:
                         state = 'waiting'
                 else:
                     sound_duration = current_time - sound_start_time
-                    if 0.5 <= sound_duration <= 1.5:
+                    if self.min_sound <= sound_duration <= self.max_sound:
                         state = 'after_sound'
                         sound_end_time = current_time
                     else:
                         state = 'waiting'
-                        
             elif state == 'after_sound':
                 if is_currently_silent:
                     trailing_silence_duration = current_time - sound_end_time
-                    if trailing_silence_duration >= 0.5:
+                    if trailing_silence_duration >= self.min_trailing_silence:
                         # Extract the word
-                        padding = 0.05
-                        extract_start = sound_start_time - current_time - padding
-                        extract_end = sound_end_time - current_time + padding
-                        
+                        extract_start = sound_start_time - current_time - self.padding
+                        extract_end = sound_end_time - current_time + self.padding
                         word_samples_with_padding = self.soundBuffer.return_last_n_seconds(abs(extract_start))
                         word_end_idx = int((abs(extract_end)) * SoundBuffer.FREQUENCY)
                         word_audio = word_samples_with_padding[:len(word_samples_with_padding) - word_end_idx]
-                        
                         audio_duration = len(word_audio) / SoundBuffer.FREQUENCY
-                        if audio_duration > 3.0:
+                        if audio_duration > self.max_audio_duration:
                             if self.debug:
                                 print(f"[Skipped: {audio_duration:.1f}s too long]")
                             state = 'waiting'
                             continue
-                        
                         matches, similarity = self.matcher.matches(word_audio, threshold=self.threshold)
                         
                         audio_rms = np.sqrt(np.mean(word_audio**2))
