@@ -14,9 +14,9 @@ dependencies = [
 ]
 authors = [ { name = "Raymond Lowe", email = "you@example.com" } ]
 urls = { Homepage = "https://github.com/raymondclowe/sound", Documentation = "https://github.com/raymondclowe/sound#readme" }
-license = { file = "LICENSE" }
+license = "MIT"
+license-files = ["LICENSE"]
 classifiers = [
-    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
     "Programming Language :: Python :: 3.11",

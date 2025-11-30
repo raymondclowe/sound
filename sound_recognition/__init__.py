@@ -15,6 +15,7 @@ Usage:
 
 from .silence import SoundBuffer
 from .matching import WordMatcher
+from .recogniser import Recogniser
 from .transcription import (
     transcribe_audio,
     resolve_stt_ip,
@@ -26,6 +27,7 @@ __version__ = "0.1.0"
 __all__ = [
     "SoundBuffer",
     "WordMatcher",
+    "Recogniser",
     "transcribe_audio",
     "resolve_stt_ip",
     "STT_HOSTNAME",
