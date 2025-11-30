@@ -9,12 +9,14 @@ This POC demonstrates the sound_recognition module capabilities including:
 The core identification and recognition logic is in the sound_recognition module.
 """
 
+
 import numpy as np
 import sounddevice as sd
 import time
 import os
 import socket
 import requests
+import sys
 
 # Import core functionality from the sound_recognition module
 from sound_recognition import (
@@ -146,10 +148,13 @@ def main():
     TARGET_WORD = None
     MICROPHONE_DEVICE = None  # None = default, or set to device index
     DEBUG_PLAYBACK = False  # Set to True to hear captured audio before STT
-    
+
+    # Parse --debug flag
+    DEBUG_FLAG = '--debug' in sys.argv
+
     # List available microphones
     list_audio_devices()
-    
+
     # Optionally select microphone
     try:
         device_input = input("Enter microphone device number (or 't' to test, or Enter for default): ").strip()
@@ -173,8 +178,8 @@ def main():
             print("Using default microphone\n")
     except ValueError:
         print("Invalid input, using default microphone\n")
-    
-    soundBuffer = SoundBuffer(seconds=10, device=MICROPHONE_DEVICE)
+
+    soundBuffer = SoundBuffer(seconds=10, device=MICROPHONE_DEVICE, debug=DEBUG_FLAG)
     matcher = WordMatcher(sample_rate=SoundBuffer.FREQUENCY)
     
     # Load or prompt for reference word
@@ -311,108 +316,114 @@ def main():
     # Wait for buffer to be full first
     while soundBuffer.samples_collected < soundBuffer.buffer_length:
         sd.sleep(100)
+    if DEBUG_FLAG:
+        print("[DEBUG] Buffer filled. Entering main detection loop.")
     
     # Check initial state
     if soundBuffer.is_silent():
+        if DEBUG_FLAG:
+            print("[DEBUG] Initial state: in_silence")
         state = 'in_silence'
         silence_start_time = time.time()
     else:
+        if DEBUG_FLAG:
+            print("[DEBUG] Initial state: waiting (not silent)")
         state = 'waiting'
         silence_start_time = None
-        
     sound_start_time = None
     sound_end_time = None
     
     while True:
         sd.sleep(100)
-            
         is_currently_silent = soundBuffer.is_silent()
         current_time = time.time()
-        
+        if DEBUG_FLAG:
+            print(f"[DEBUG] State: {state}, Silent: {is_currently_silent}")
         if state == 'waiting':
             if is_currently_silent:
+                if DEBUG_FLAG:
+                    print("[DEBUG] Transition: waiting -> in_silence")
                 state = 'in_silence'
                 silence_start_time = current_time
-                silence_start_time = current_time
-                
         elif state == 'in_silence':
             if not is_currently_silent:
                 silence_duration = current_time - silence_start_time
+                if DEBUG_FLAG:
+                    print(f"[DEBUG] Silence duration: {silence_duration:.2f}s")
                 if silence_duration >= 1.0:
+                    if DEBUG_FLAG:
+                        print("[DEBUG] Transition: in_silence -> in_sound")
                     state = 'in_sound'
                     sound_start_time = current_time
                 else:
+                    if DEBUG_FLAG:
+                        print("[DEBUG] Not enough silence, back to waiting")
                     state = 'waiting'
-                    
         elif state == 'in_sound':
             if not is_currently_silent:
                 sound_duration = current_time - sound_start_time
+                if DEBUG_FLAG:
+                    print(f"[DEBUG] Sound duration: {sound_duration:.2f}s")
                 if sound_duration > 1.5:
+                    if DEBUG_FLAG:
+                        print("[DEBUG] Sound too long, back to waiting")
                     state = 'waiting'
             else:
                 sound_duration = current_time - sound_start_time
+                if DEBUG_FLAG:
+                    print(f"[DEBUG] Sound ended, duration: {sound_duration:.2f}s")
                 if 0.5 <= sound_duration <= 1.5:
+                    if DEBUG_FLAG:
+                        print("[DEBUG] Transition: in_sound -> after_sound")
                     state = 'after_sound'
                     sound_end_time = current_time
                 else:
+                    if DEBUG_FLAG:
+                        print("[DEBUG] Sound too short/long, back to waiting")
                     state = 'waiting'
-                    
         elif state == 'after_sound':
             if is_currently_silent:
                 trailing_silence_duration = current_time - sound_end_time
-                if trailing_silence_duration >= 0.5:  # Reduced from 1.0s to 0.5s
+                if DEBUG_FLAG:
+                    print(f"[DEBUG] Trailing silence: {trailing_silence_duration:.2f}s")
+                if trailing_silence_duration >= 0.5:
                     # Extract the word
                     extract_start_time = time.time()
-                    padding = 0.05  # Reduced padding to avoid capturing too much silence
+                    padding = 0.05
                     extract_start = sound_start_time - current_time - padding
                     extract_end = sound_end_time - current_time + padding
-                    
                     word_samples_with_padding = soundBuffer.return_last_n_seconds(abs(extract_start))
                     word_end_idx = int((abs(extract_end)) * SoundBuffer.FREQUENCY)
                     word_audio = word_samples_with_padding[:len(word_samples_with_padding) - word_end_idx]
-                    
-                    # Skip if audio is too long (likely noise/hallucination)
                     audio_duration = len(word_audio) / SoundBuffer.FREQUENCY
-                    if audio_duration > 3.0:  # Skip clips longer than 3 seconds
-                        print(f"[Skipped: {audio_duration:.1f}s too long]")
+                    if audio_duration > 3.0:
+                        if DEBUG_FLAG:
+                            print(f"[Skipped: {audio_duration:.1f}s too long]")
                         state = 'waiting'
                         continue
-                    
                     extract_time = time.time() - extract_start_time
-                    
-                    # Check similarity
                     mfcc_start_time = time.time()
                     matches, similarity = matcher.matches(word_audio, threshold=SIMILARITY_THRESHOLD)
                     mfcc_time = time.time() - mfcc_start_time
-                    
-                    # Calculate audio stats for debugging
                     audio_rms = np.sqrt(np.mean(word_audio**2))
                     audio_max = np.max(np.abs(word_audio))
-                    
-                    print(f"[Timing] Extract: {extract_time*1000:.1f}ms, MFCC: {mfcc_time*1000:.1f}ms", end="")
-                    print(f" [Audio: RMS={audio_rms:.4f}, Max={audio_max:.4f}, Sim={similarity:.1f}]", end="")
-                    
+                    if DEBUG_FLAG:
+                        print(f"[Timing] Extract: {extract_time*1000:.1f}ms, MFCC: {mfcc_time*1000:.1f}ms", end="")
+                        print(f" [Audio: RMS={audio_rms:.4f}, Max={audio_max:.4f}, Sim={similarity:.1f}]", end="")
                     if matches:
-                        # Optional debug playback
                         if DEBUG_PLAYBACK:
                             print(f" - PLAYING ({audio_duration:.2f}s)...", end="", flush=True)
                             sd.play(word_audio, SoundBuffer.FREQUENCY)
                             sd.wait()
                             print(" DONE", end="")
-                        
-                        # Send to STT for confirmation
                         stt_start_time = time.time()
                         prompt = f"Wake word: {TARGET_WORD}" if TARGET_WORD else "Wake word: computer"
                         transcription = transcribe_audio(word_audio, SoundBuffer.FREQUENCY, prompt=prompt, model="tiny")
                         stt_time = time.time() - stt_start_time
-                        
-                        print(f", STT: {stt_time*1000:.1f}ms")
-                        
+                        if DEBUG_FLAG:
+                            print(f", STT: {stt_time*1000:.1f}ms")
                         if transcription:
-                            # Clean up transcription for comparison
                             transcription_clean = transcription.strip().lower().rstrip('.,!?;:')
-                            
-                            # Check if target word appears in the transcription (allows "ok computer", "computer activate", etc)
                             if TARGET_WORD and TARGET_WORD in transcription_clean.split():
                                 print(f"✓ CONFIRMED: '{transcription}'")
                                 play_confirmation_chime()
@@ -421,15 +432,16 @@ def main():
                         else:
                             print(f"? MATCH - STT failed")
                     else:
-                        # Optional debug playback for non-matches
                         if DEBUG_PLAYBACK:
                             print(f" - PLAYING NON-MATCH ({audio_duration:.2f}s)...", end="", flush=True)
                             sd.play(word_audio, SoundBuffer.FREQUENCY)
                             sd.wait()
-                        print()  # Newline for timing output
-                    
+                        if DEBUG_FLAG:
+                            print()  # Newline for timing output
                     state = 'waiting'
             else:
+                if DEBUG_FLAG:
+                    print("[DEBUG] Trailing silence broken, back to waiting")
                 state = 'waiting'
 
 
