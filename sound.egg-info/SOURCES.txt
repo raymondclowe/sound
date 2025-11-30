@@ -1,8 +1,0 @@
-README.md
-main.py
-pyproject.toml
-sound.egg-info/PKG-INFO
-sound.egg-info/SOURCES.txt
-sound.egg-info/dependency_links.txt
-sound.egg-info/requires.txt
-sound.egg-info/top_level.txt
