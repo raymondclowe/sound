@@ -217,3 +217,72 @@ class SoundBuffer:
             return self.data[start_index:self.pointer]
         else:
             return np.concatenate((self.data[start_index:], self.data[:self.pointer]))
+
+
+def list_audio_devices():
+    """Utility to list available audio input devices.
+
+    Returns:
+        list: Devices returned by sounddevice.query_devices()
+    """
+    devices = sd.query_devices()
+    found = False
+    print("\nAvailable audio input devices:")
+    print("=" * 60)
+    for i, device in enumerate(devices):
+        if isinstance(device, dict):
+            max_in_val = int(device.get('max_input_channels', 0))
+            name = device.get('name', str(i))
+        else:
+            max_in_val = int(getattr(device, 'max_input_channels', 0))
+            name = getattr(device, 'name', str(i))
+        if max_in_val > 0:
+            found = True
+            print(f"{i}: {name} (channels: {max_in_val})")
+    if not found:
+        print("[DEBUG] No input devices found with >0 channels. Full device list:")
+        for i, device in enumerate(devices):
+            print(f"{i}: {device}")
+    print("=" * 60 + "\n")
+    return devices
+
+
+def test_microphone_level(device_id, duration=3):
+    """Utility to test a microphone device and display levels.
+
+    Args:
+        device_id (int): Device index
+        duration (int): Duration in seconds to test
+    Returns:
+        numpy.ndarray: Recorded audio samples
+    """
+    print(f"\nTesting device {device_id} for {duration} seconds...")
+    print("Please speak or make noise!")
+    print("Level: ", end="", flush=True)
+    recorded_data = []
+    def callback(indata, frames, time, status):
+        audio = indata[:, 0] if indata.ndim > 1 else indata.flatten()
+        recorded_data.append(audio.copy())
+        rms = np.sqrt(np.mean(audio**2))
+        max_val = np.max(np.abs(audio))
+        bar_length = int(rms * 100)
+        print(f"\rLevel: {'█' * min(bar_length, 50)} RMS={rms:.4f} Max={max_val:.4f}", end="", flush=True)
+    try:
+        dev_info = sd.query_devices(device_id)
+        if isinstance(dev_info, dict):
+            channels = int(dev_info.get('max_input_channels', 1))
+        else:
+            channels = int(getattr(dev_info, 'max_input_channels', 1))
+        with sd.InputStream(samplerate=16000, channels=channels, callback=callback, device=device_id):
+            sd.sleep(int(duration * 1000))
+        print()
+        if recorded_data:
+            all_audio = np.concatenate(recorded_data)
+            print(f"\nPlayback of recorded audio ({len(all_audio)/16000:.1f}s)...")
+            sd.play(all_audio, 16000)
+            sd.wait()
+            print("Playback complete.\n")
+            return all_audio
+    except Exception as e:
+        print(f"\nError testing device: {e}")
+        return None
