@@ -1,9 +1,9 @@
 """
-Demo CLI wrapper entrypoint for the sound-recognition demo.
+Demo CLI wrapper entrypoint for the easywakeword demo.
 
 This script provides a simple entry point for the example/demo. It calls
 the existing `main()` function from `main.py` so the package can expose a
-`sound-demo` console script in `pyproject.toml`.
+`easywakeword-demo` console script in `pyproject.toml`.
 """
 from main import main
 

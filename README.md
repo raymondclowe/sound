@@ -20,22 +20,22 @@ This project is a Python-based wake word detection and speech transcription tool
 2. The system will listen for the wake word and confirm with a chime when detected.
 3. Transcription is performed using the selected STT backend.
 
+
 Example commands:
 ```bash
-# Generate example WAVs (optional)
-python scripts/generate_example_wavs.py
+# Ensure you have the real example WAVs in the root of the repository (not generated tones).
 
 # Run demo (if using the repository directly)
 python -m demo --debug
 
 # After packaging or installation the console script is available:
-sound-demo --debug
+easywakeword-demo --debug
 ```
 
 ### How to use in your own code
 
 ```python
-from sound_recognition.recogniser import Recogniser
+from easywakeword import Recogniser
 
 recogniser = Recogniser(
 	wakewordstrings=["computer", "computer", "computer"],
@@ -67,7 +67,7 @@ For more details, see the code and comments in `main.py`.
 This project already uses a `pyproject.toml` file for packaging (PEP 621). Below is a checklist and a short guide to make this project pip-installable and publishable to PyPI.
 
 Checklist
-- Ensure `project.name` in `pyproject.toml` is unique on PyPI — `sound` might already be taken; consider `sound-recognition`.
+- Ensure `project.name` in `pyproject.toml` is unique on PyPI — consider `easywakeword` or similar.
 - Update `project.version` and other fields (`authors`, `license`, `classifiers`, `urls`) in `pyproject.toml`.
 - Ensure `readme = "README.md"` (already present) and `description` is filled.
 - Create a license file (e.g., `LICENSE`).

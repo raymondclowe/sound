@@ -1,5 +1,5 @@
 import numpy as np
-from sound_recognition.matching import WordMatcher
+from easywakeword import WordMatcher
 
 
 def test_add_and_match():

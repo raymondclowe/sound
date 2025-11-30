@@ -1,10 +1,9 @@
 """
-Word Matching Module
+Word Matching Module (migrated from easywakeword.matching)
 
 Provides MFCC-based word matching functionality for comparing audio clips
-against a reference word (Temporal Feature Fingerprinting).
+against reference word profiles.
 """
-
 from typing import Optional, Tuple
 
 import numpy as np
@@ -75,3 +74,4 @@ class WordMatcher:
 
     def clear_references(self):
         self.references = []
+__all__ = ["WordMatcher"]

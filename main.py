@@ -1,12 +1,12 @@
 """
 Sound Wake Word Detection - Proof of Concept
 
-This POC demonstrates the sound_recognition module capabilities including:
+This POC demonstrates the easywakeword module capabilities including:
 - Real-time audio capture and silence detection
 - MFCC-based word matching for wake word detection
 - Integration with external speech-to-text (STT) engines
 
-The core identification and recognition logic is in the sound_recognition module.
+The core identification and recognition logic is in the easywakeword module.
 """
 
 
@@ -15,7 +15,8 @@ The core identification and recognition logic is in the sound_recognition module
 import numpy as np
 import sounddevice as sd
 import sys
-from sound_recognition.recogniser import Recogniser
+import os
+from easywakeword import Recogniser
 
 # Resolve STT IP at startup for this POC
 
@@ -45,11 +46,11 @@ def play_confirmation_chime():
 
 
 
-from sound_recognition.silence import list_audio_devices, test_microphone_level
+from easywakeword.silence import list_audio_devices, test_microphone_level
 
 
 
-# list_audio_devices moved to sound_recognition.silence
+# list_audio_devices moved to easywakeword.silence
 
 
 
@@ -83,9 +84,25 @@ def main():
     #     print("Invalid input, using default microphone\n")
 
     # Create recogniser object
+
+    # Try to find the real WAV files in the project root (not examples/)
+    wav_files = [
+        "example_computer_male.wav",
+        "example_computer_female.wav",
+        "example_computer_male_teen.wav"
+    ]
+    wav_paths = [os.path.join(os.path.dirname(__file__), f) for f in wav_files]
+    missing = [p for p in wav_paths if not os.path.isfile(p)]
+    if missing:
+        print("[DEMO ERROR] One or more required WAV files are missing:")
+        for p in missing:
+            print(f"  Missing: {p}")
+        print("Please copy the real example_computer_*.wav files to the project root.")
+        sys.exit(1)
+
     recogniser = Recogniser(
         wakewordstrings=["computer", "computer", "computer"],
-        wakewordreferenceaudios=["examples/example_computer_male.wav", "examples/example_computer_female.wav", "examples/example_computer_male_teen.wav"],
+        wakewordreferenceaudios=wav_paths,
         threshold=75,
         device=int(1),
         debug='--debug' in sys.argv,
