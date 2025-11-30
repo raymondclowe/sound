@@ -102,37 +102,37 @@ def list_audio_devices():
 
 
 def main():
-    list_audio_devices()
-    try:
-        device_input = input("Enter microphone device number (or 't' to test, or Enter for default): ").strip()
-        if device_input.lower() == 't':
-            test_device = input("Enter device number to test: ").strip()
-            if test_device:
-                test_audio = test_microphone_level(int(test_device), duration=5)
-                response = input("Use this device? (y/n): ").strip().lower()
-                if response == 'y':
-                    MICROPHONE_DEVICE = int(test_device)
-                    print(f"Using device {MICROPHONE_DEVICE}\n")
-                else:
-                    MICROPHONE_DEVICE = None
-                    print("Using default microphone\n")
-        elif device_input:
-            MICROPHONE_DEVICE = int(device_input)
-            print(f"Testing device {MICROPHONE_DEVICE}...")
-            test_microphone_level(MICROPHONE_DEVICE, duration=3)
-            print(f"Using device {MICROPHONE_DEVICE}\n")
-        else:
-            MICROPHONE_DEVICE = None
-            print("Using default microphone\n")
-    except ValueError:
-        MICROPHONE_DEVICE = None
-        print("Invalid input, using default microphone\n")
+    # list_audio_devices()
+    # try:
+    #     device_input = input("Enter microphone device number (or 't' to test, or Enter for default): ").strip()
+    #     if device_input.lower() == 't':
+    #         test_device = input("Enter device number to test: ").strip()
+    #         if test_device:
+    #             test_audio = test_microphone_level(int(test_device), duration=5)
+    #             response = input("Use this device? (y/n): ").strip().lower()
+    #             if response == 'y':
+    #                 MICROPHONE_DEVICE = int(test_device)
+    #                 print(f"Using device {MICROPHONE_DEVICE}\n")
+    #             else:
+    #                 MICROPHONE_DEVICE = None
+    #                 print("Using default microphone\n")
+    #     elif device_input:
+    #         MICROPHONE_DEVICE = int(device_input)
+    #         print(f"Testing device {MICROPHONE_DEVICE}...")
+    #         test_microphone_level(MICROPHONE_DEVICE, duration=3)
+    #         print(f"Using device {MICROPHONE_DEVICE}\n")
+    #     else:
+    #         MICROPHONE_DEVICE = None
+    #         print("Using default microphone\n")
+    # except ValueError:
+    #     MICROPHONE_DEVICE = None
+    #     print("Invalid input, using default microphone\n")
 
     # Create recogniser object
     recogniser = Recogniser(
         wakewordreferenceaudio="reference_word.wav",
         threshold=75,
-        device=MICROPHONE_DEVICE,
+        device=int(1),
         debug='--debug' in sys.argv,
         debug_playback=False
     )
