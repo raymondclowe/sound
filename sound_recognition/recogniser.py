@@ -8,6 +8,29 @@ from .silence import SoundBuffer
 from .transcription import transcribe_audio, resolve_stt_ip, STT_HOSTNAME, STT_PORT
 
 class Recogniser:
+    def __del__(self):
+        # Destructor: ensure audio stream is stopped and closed, and STT session is closed
+        try:
+            sb = getattr(self, 'soundBuffer', None)
+            if sb is not None:
+                stream = getattr(sb, 'sd_stream', None)
+                if stream is not None:
+                    try:
+                        stream.stop()
+                    except Exception:
+                        pass
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
+        except Exception as e:
+            print(f"[DEBUG] Exception during Recogniser cleanup: {e}")
+        # Close STT session
+        try:
+            from sound_recognition.transcription import close_stt_session
+            close_stt_session()
+        except Exception as e:
+            print(f"[DEBUG] Exception closing STT session: {e}")
     def __init__(self,
                  wakewordstring=None,
                  wakewordreferenceaudio=None,
@@ -20,96 +43,111 @@ class Recogniser:
                  device=None,
                  debug=False,
                  debug_playback=False,
-                 min_silence_before=1.0,
-                 min_sound=0.5,
-                 max_sound=1.5,
-                 min_trailing_silence=0.5,
-                 max_audio_duration=3.0,
-                 padding=0.05):
-        self.wakewordstring = wakewordstring
-        self.wakewordreferenceaudio = wakewordreferenceaudio
-        self.wordsminmax = wordsminmax
-        self.threshold = threshold
-        self.whisperurl = whisperurl or f"http://{resolve_stt_ip()}:{STT_PORT}"
-        self.whispermodel = whispermodel
-        self.languages = languages or ['en']
-        self.timeout = timeout
-        self.device = device
-        self.debug = debug
-        self.debug_playback = debug_playback
-        self.min_silence_before = min_silence_before
-        self.min_sound = min_sound
-        self.max_sound = max_sound
-        self.min_trailing_silence = min_trailing_silence
-        self.max_audio_duration = max_audio_duration
-        self.padding = padding
-        self.soundBuffer = SoundBuffer(seconds=10, device=device, debug=debug)
-        self.matcher = WordMatcher(sample_rate=SoundBuffer.FREQUENCY)
-        self.target_word = None
-        self._setup_reference()
+                while True:
+                    sd.sleep(100)
+                    is_currently_silent = self.soundBuffer.is_silent()
+                    current_time = time.time()
+                    # Debug: print state and threshold
+                    if self.debug:
+                        print(f"[DEBUG] State: {state}, SilenceThresh: {getattr(self.soundBuffer, 'silence_threshold', None):.4f}")
+                    prev_state = state
+                    if state == 'waiting':
+                        if is_currently_silent:
+                            state = 'in_silence'
+                            silence_start_time = current_time
+                    elif state == 'in_silence':
+                        if not is_currently_silent and silence_start_time is not None:
+                            silence_duration = current_time - silence_start_time
+                            if silence_duration >= self.min_silence_before:
+                                state = 'in_sound'
+                                sound_start_time = current_time
+                            else:
+                                state = 'waiting'
+                    elif state == 'in_sound':
+                        if not is_currently_silent and sound_start_time is not None:
+                            sound_duration = current_time - sound_start_time
+                            if sound_duration > self.max_sound:
+                                state = 'waiting'
+                        elif sound_start_time is not None:
+                            sound_duration = current_time - sound_start_time
+                            if self.min_sound <= sound_duration <= self.max_sound:
+                                state = 'after_sound'
+                                sound_end_time = current_time
+                            else:
+                                state = 'waiting'
+                    elif state == 'after_sound':
+                        if is_currently_silent and sound_end_time is not None:
+                            trailing_silence_duration = current_time - sound_end_time
+                            if trailing_silence_duration >= self.min_trailing_silence and sound_start_time is not None:
+                                # Extract the word
+                                extract_start = sound_start_time - current_time - self.padding
+                                extract_end = sound_end_time - current_time + self.padding
+                                word_samples_with_padding = self.soundBuffer.return_last_n_seconds(abs(extract_start))
+                                word_end_idx = int((abs(extract_end)) * SoundBuffer.FREQUENCY)
+                                word_audio = word_samples_with_padding[:len(word_samples_with_padding) - word_end_idx]
+                                audio_duration = len(word_audio) / SoundBuffer.FREQUENCY
+                                if audio_duration > self.max_audio_duration:
+                                    if self.debug:
+                                        print(f"[Skipped: {audio_duration:.1f}s too long]")
+                                    state = 'waiting'
+                                    continue
+                                matches, similarity, best_ref = self.matcher.matches(word_audio, threshold=self.threshold)
 
-    def _setup_reference(self):
-        if self.wakewordreferenceaudio and os.path.exists(self.wakewordreferenceaudio):
-            self.matcher.load_reference_from_file(self.wakewordreferenceaudio)
-            import soundfile as sf
-            ref_audio, _ = sf.read(self.wakewordreferenceaudio)
-            self.target_word = transcribe_audio(ref_audio, SoundBuffer.FREQUENCY)
-            if self.target_word:
-                self.target_word = self.target_word.strip().lower().rstrip('.,!?;:')
-        elif self.wakewordstring:
-            # Optionally support text-only reference (future)
-            pass
-        else:
-            raise ValueError("Must provide wakewordreferenceaudio or wakewordstring")
+                                audio_rms = np.sqrt(np.mean(word_audio**2))
+                                audio_max = np.max(np.abs(word_audio))
 
-    def waitforit(self):
-        # Wait for buffer to fill
-        while self.soundBuffer.samples_collected < self.soundBuffer.buffer_length:
-            sd.sleep(100)
-        
-        # Check initial state
-        if self.soundBuffer.is_silent():
-            state = 'in_silence'
-            silence_start_time = time.time()
-        else:
-            state = 'waiting'
-            silence_start_time = None
-            
-        sound_start_time = None
-        sound_end_time = None
-        
-        while True:
-            sd.sleep(100)
-            is_currently_silent = self.soundBuffer.is_silent()
-            current_time = time.time()
-            if state == 'waiting':
-                if is_currently_silent:
-                    state = 'in_silence'
-                    silence_start_time = current_time
-            elif state == 'in_silence':
-                if not is_currently_silent:
-                    silence_duration = current_time - silence_start_time
-                    if silence_duration >= self.min_silence_before:
-                        state = 'in_sound'
-                        sound_start_time = current_time
-                    else:
-                        state = 'waiting'
-            elif state == 'in_sound':
-                if not is_currently_silent:
-                    sound_duration = current_time - sound_start_time
-                    if sound_duration > self.max_sound:
-                        state = 'waiting'
-                else:
-                    sound_duration = current_time - sound_start_time
-                    if self.min_sound <= sound_duration <= self.max_sound:
-                        state = 'after_sound'
-                        sound_end_time = current_time
-                    else:
-                        state = 'waiting'
-            elif state == 'after_sound':
-                if is_currently_silent:
+                                # Calculate log-scale score: heavily emphasizes differences near 100%
+                                # Much more aggressive scaling to separate good from bad matches
+                                if similarity >= 100:
+                                    log_score = 100.0
+                                else:
+                                    # Aggressive exponential scale: 96% should score around 50-60
+                                    # Formula: 100 - (100 - similarity)^2
+                                    log_score = 100 - (100 - similarity) ** 2.5
+
+                                print(f"[Match: {similarity:.1f}% LogScore: {log_score:.1f} (threshold={self.threshold}%) RMS={audio_rms:.4f} Max={audio_max:.4f}]", end=" ")
+
+                                # ...existing code for match handling...
+                                if similarity >= self.threshold:
+                                    if self.debug_playback:
+                                        sd.play(word_audio, SoundBuffer.FREQUENCY)
+                                        sd.wait()
+                                    prompt = f"Wea are looking for the Wake word alone or in a short phrase, the wakeword today is : {self.target_word}" if self.target_word else "Wake word: computer"
+                                    transcription = transcribe_audio(word_audio, SoundBuffer.FREQUENCY, prompt=prompt, model=self.whispermodel)
+                                    if transcription:
+                                        import re
+                                        # Remove non-alphanumeric, split, and lower
+                                        words = [re.sub(r'[^a-z0-9]', '', w) for w in transcription.strip().lower().rstrip('.,!?;:').split()]
+                                        words = [w for w in words if w]
+                                        word_count = len(words)
+                                        min_words, max_words = self.wordsminmax if isinstance(self.wordsminmax, (list, tuple)) else (1, 1)
+                                        if min_words <= word_count <= max_words:
+                                            target = re.sub(r'[^a-z0-9]', '', self.target_word.lower()) if self.target_word else None
+                                            if target and target in words:
+                                                others = [w for w in words if w != target]
+                                                if all(w in self.allowed_other_words for w in others):
+                                                    print(f"✓ CONFIRMED: '{transcription}'")
+                                                    return transcription.strip().lower().rstrip('.,!?;:')
+                                                else:
+                                                    print(f"✗ REJECTED: '{transcription}' (unapproved extra words: {[w for w in others if w not in self.allowed_other_words]})")
+                                            else:
+                                                print(f"? DETECTED: '{transcription}' - expected '{self.target_word}'")
+                                        else:
+                                            print(f"✗ REJECTED: '{transcription}' (word count {word_count} not in range {min_words}-{max_words})")
+                                    else:
+                                        print(f"? MATCH - STT failed")
+                                else:
+                                    # Do not run STT or confirm if below threshold
+                                    if self.debug_playback:
+                                        sd.play(word_audio, SoundBuffer.FREQUENCY)
+                                        sd.wait()
+                                state = 'waiting'
+                    # Debug: print state transitions
+                    if self.debug and prev_state != state:
+                        print(f"[DEBUG] State transition: {prev_state} -> {state}")
+                if is_currently_silent and sound_end_time is not None:
                     trailing_silence_duration = current_time - sound_end_time
-                    if trailing_silence_duration >= self.min_trailing_silence:
+                    if trailing_silence_duration >= self.min_trailing_silence and sound_start_time is not None:
                         # Extract the word
                         extract_start = sound_start_time - current_time - self.padding
                         extract_end = sound_end_time - current_time + self.padding
@@ -122,11 +160,11 @@ class Recogniser:
                                 print(f"[Skipped: {audio_duration:.1f}s too long]")
                             state = 'waiting'
                             continue
-                        matches, similarity = self.matcher.matches(word_audio, threshold=self.threshold)
-                        
+                        matches, similarity, best_ref = self.matcher.matches(word_audio, threshold=self.threshold)
+
                         audio_rms = np.sqrt(np.mean(word_audio**2))
                         audio_max = np.max(np.abs(word_audio))
-                        
+
                         # Calculate log-scale score: heavily emphasizes differences near 100%
                         # Much more aggressive scaling to separate good from bad matches
                         if similarity >= 100:
@@ -135,25 +173,40 @@ class Recogniser:
                             # Aggressive exponential scale: 96% should score around 50-60
                             # Formula: 100 - (100 - similarity)^2
                             log_score = 100 - (100 - similarity) ** 2.5
-                        
+
                         print(f"[Match: {similarity:.1f}% LogScore: {log_score:.1f} (threshold={self.threshold}%) RMS={audio_rms:.4f} Max={audio_max:.4f}]", end=" ")
-                        
-                        if matches:
+
+                        # Only accept if log_score >= threshold
+                        if similarity >= self.threshold:
                             if self.debug_playback:
                                 sd.play(word_audio, SoundBuffer.FREQUENCY)
                                 sd.wait()
-                            prompt = f"Wake word: {self.target_word}" if self.target_word else "Wake word: computer"
+                            prompt = f"Wea are looking for the Wake word alone or in a short phrase, the wakeword today is : {self.target_word}" if self.target_word else "Wake word: computer"
                             transcription = transcribe_audio(word_audio, SoundBuffer.FREQUENCY, prompt=prompt, model=self.whispermodel)
                             if transcription:
-                                transcription_clean = transcription.strip().lower().rstrip('.,!?;:')
-                                if self.target_word and self.target_word in transcription_clean.split():
-                                    print(f"✓ CONFIRMED: '{transcription}'")
-                                    return transcription_clean
+                                import re
+                                # Remove non-alphanumeric, split, and lower
+                                words = [re.sub(r'[^a-z0-9]', '', w) for w in transcription.strip().lower().rstrip('.,!?;:').split()]
+                                words = [w for w in words if w]
+                                word_count = len(words)
+                                min_words, max_words = self.wordsminmax if isinstance(self.wordsminmax, (list, tuple)) else (1, 1)
+                                if min_words <= word_count <= max_words:
+                                    target = re.sub(r'[^a-z0-9]', '', self.target_word.lower()) if self.target_word else None
+                                    if target and target in words:
+                                        others = [w for w in words if w != target]
+                                        if all(w in self.allowed_other_words for w in others):
+                                            print(f"✓ CONFIRMED: '{transcription}'")
+                                            return transcription.strip().lower().rstrip('.,!?;:')
+                                        else:
+                                            print(f"✗ REJECTED: '{transcription}' (unapproved extra words: {[w for w in others if w not in self.allowed_other_words]})")
+                                    else:
+                                        print(f"? DETECTED: '{transcription}' - expected '{self.target_word}'")
                                 else:
-                                    print(f"? DETECTED: '{transcription}' - expected '{self.target_word}'")
+                                    print(f"✗ REJECTED: '{transcription}' (word count {word_count} not in range {min_words}-{max_words})")
                             else:
                                 print(f"? MATCH - STT failed")
                         else:
+                            # Do not run STT or confirm if below threshold
                             if self.debug_playback:
                                 sd.play(word_audio, SoundBuffer.FREQUENCY)
                                 sd.wait()

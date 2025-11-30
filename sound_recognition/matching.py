@@ -38,14 +38,11 @@ class WordMatcher:
     def __init__(self, sample_rate: int = 16000) -> None:
         """
         Initialize the WordMatcher.
-        
         Args:
             sample_rate (int): Audio sample rate in Hz. Default is 16000.
         """
         self.sample_rate = sample_rate
-        self.reference_mfcc_mean: Optional[np.ndarray] = None
-        self.reference_mfcc_std: Optional[np.ndarray] = None
-        self.reference_word: Optional[str] = None
+        self.references = []  # List of dicts: {"mean": ..., "std": ..., "label": ..., "filename": ...}
         
     def extract_mfcc(self, audio: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """
@@ -66,28 +63,42 @@ class WordMatcher:
         
         return mfcc_mean, mfcc_std
     
-    def set_reference(self, audio: np.ndarray, word_name: str = "target") -> None:
+    def add_reference(self, audio: np.ndarray, word_name: str = "target", filename: str = None) -> None:
         """
-        Set the reference word to match against.
-        
+        Add a reference sample to the matcher.
         Args:
             audio: Audio samples as numpy array.
             word_name (str): Name/label for the reference word.
+            filename (str): Optional filename for traceability.
         """
-        self.reference_word = word_name
-        self.reference_mfcc_mean, self.reference_mfcc_std = self.extract_mfcc(audio)
-        print(f"Reference word '{word_name}' set with MFCC shape: {self.reference_mfcc_mean.shape}")
+        mfcc_mean, mfcc_std = self.extract_mfcc(audio)
+        self.references.append({
+            "mean": mfcc_mean,
+            "std": mfcc_std,
+            "label": word_name,
+            "filename": filename
+        })
+        print(f"Added reference '{word_name}' (file: {filename}) with MFCC shape: {mfcc_mean.shape}")
         
     def load_reference_from_file(self, filepath: str, word_name: str = "target") -> None:
         """
-        Load reference word from audio file.
-        
+        Load a single reference word from audio file.
         Args:
             filepath (str): Path to the audio file.
             word_name (str): Name/label for the reference word.
         """
         audio, sr = librosa.load(filepath, sr=self.sample_rate)
-        self.set_reference(audio, word_name)
+        self.add_reference(audio, word_name, filename=filepath)
+
+    def load_references_from_files(self, filepaths: list, word_name: str = "target") -> None:
+        """
+        Load multiple reference samples from a list of audio files.
+        Args:
+            filepaths (list): List of file paths to audio files.
+            word_name (str): Name/label for the reference word.
+        """
+        for fp in filepaths:
+            self.load_reference_from_file(fp, word_name)
         
     def save_reference(self, filepath: str, audio: np.ndarray) -> None:
         """
@@ -100,56 +111,39 @@ class WordMatcher:
         sf.write(filepath, audio, self.sample_rate)
         print(f"Reference saved to {filepath}")
         
-    def calculate_similarity(self, audio: np.ndarray) -> float:
+    def calculate_similarity(self, audio: np.ndarray, reference: dict) -> float:
         """
-        Calculate similarity between audio and reference word.
-        
-        Uses both mean and std of MFCCs for better discrimination.
-        
+        Calculate similarity between audio and a reference sample.
         Args:
             audio: Audio samples as numpy array.
-            
+            reference: Reference dict with 'mean' and 'std'.
         Returns:
             float: Similarity score (0-100, higher is more similar).
-            
-        Raises:
-            ValueError: If no reference word has been set.
         """
-        if self.reference_mfcc_mean is None:
-            raise ValueError("No reference word set. Call set_reference() first.")
-        
-        # Extract MFCC from candidate audio
         candidate_mfcc_mean, candidate_mfcc_std = self.extract_mfcc(audio)
-        
-        # Calculate cosine similarity for both mean and std
-        sim_mean = 1 - cosine(self.reference_mfcc_mean, candidate_mfcc_mean)
-        sim_std = 1 - cosine(self.reference_mfcc_std, candidate_mfcc_std)
-        
-        # Combine similarities (mean is more important)
+        sim_mean = 1 - cosine(reference["mean"], candidate_mfcc_mean)
+        sim_std = 1 - cosine(reference["std"], candidate_mfcc_std)
         combined_similarity = (sim_mean * 0.7 + sim_std * 0.3)
-        
-        # Scale to 0-100 for better readability and apply non-linear scaling
-        # This spreads out the scores to create more separation
         similarity_percent = combined_similarity * 100
-        
-        # Apply exponential scaling to amplify differences
-        # This makes high scores higher and low scores lower
         scaled_similarity = (similarity_percent ** 1.5) / (100 ** 0.5)
-        
         return scaled_similarity
     
-    def matches(self, audio: np.ndarray, threshold: float = 75) -> Tuple[bool, float]:
+    def matches(self, audio: np.ndarray, threshold: float = 75) -> Tuple[bool, float, dict]:
         """
-        Check if audio matches reference word.
-        
+        Check if audio matches any reference sample.
         Args:
             audio: Audio samples to check.
             threshold (float): Similarity threshold (0-100). Default 75 for good separation.
-                              Typical good matches: 85-100
-                              Typical non-matches: 60-80
-        
         Returns:
-            tuple: (matches: bool, similarity: float)
+            tuple: (matches: bool, best_similarity: float, best_reference: dict)
         """
-        similarity = self.calculate_similarity(audio)
-        return similarity >= threshold, similarity
+        if not self.references:
+            raise ValueError("No reference samples set. Use add_reference() or load_reference_from_file().")
+        best_similarity = -float('inf')
+        best_ref = None
+        for ref in self.references:
+            sim = self.calculate_similarity(audio, ref)
+            if sim > best_similarity:
+                best_similarity = sim
+                best_ref = ref
+        return best_similarity >= threshold, best_similarity, best_ref

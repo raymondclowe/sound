@@ -59,7 +59,11 @@ def test_microphone_level(device_id, duration=3):
         print(f"\rLevel: {'█' * min(bar_length, 50)} RMS={rms:.4f} Max={max_val:.4f}", end="", flush=True)
     try:
         dev_info = sd.query_devices(device_id)
-        channels = int(getattr(dev_info, 'max_input_channels', dev_info.get('max_input_channels', 1) if isinstance(dev_info, dict) else 1))
+        # Use .get for dict access to avoid type errors
+        if isinstance(dev_info, dict):
+            channels = int(dev_info.get('max_input_channels', 1))
+        else:
+            channels = int(getattr(dev_info, 'max_input_channels', 1))
         with sd.InputStream(samplerate=16000, channels=channels, callback=callback, device=device_id):
             sd.sleep(int(duration * 1000))
         print()
@@ -83,12 +87,12 @@ def list_audio_devices():
     found = False
     for i, device in enumerate(devices):
         try:
-            max_in_val = int(device['max_input_channels'])
+            max_in_val = int(device.get('max_input_channels', 0)) if isinstance(device, dict) else int(getattr(device, 'max_input_channels', 0))
         except Exception:
             continue
         if max_in_val > 0:
             found = True
-            name = device['name']
+            name = device.get('name', str(i)) if isinstance(device, dict) else getattr(device, 'name', str(i))
             print(f"{i}: {name} (channels: {max_in_val})")
     if not found:
         print("[DEBUG] No input devices found with >0 channels. Full device list:")
@@ -130,11 +134,28 @@ def main():
 
     # Create recogniser object
     recogniser = Recogniser(
-        wakewordreferenceaudio="reference_word.wav",
-        threshold=75,
-        device=int(1),
-        debug='--debug' in sys.argv,
-        debug_playback=False
+        wakewordreferenceaudio=["reference_word.wav", "reference_word_male.wav"],  # List of reference audio files
+        wakewordstring="computer",  # Target wake word (required for logic)
+        threshold=75,  # MFCC similarity threshold (0-100)
+        device=int(1),  # Audio input device index
+        debug='--debug' in sys.argv,  # Enable debug output if '--debug' in args
+        debug_playback=False,  # Play back detected audio for debugging
+        min_silence_before=1.0,  # Minimum silence before word (seconds)
+        min_sound=0.5,           # Minimum sound duration (seconds)
+        max_sound=1.5,           # Maximum sound duration (seconds)
+        min_trailing_silence=0.5, # Minimum silence after word (seconds)
+        max_audio_duration=3.0,  # Maximum allowed audio duration (seconds)
+        padding=0.05,            # Padding (seconds) before/after detected word
+        # Acceptable min/max number of words in phrase
+        allowed_other_words=[    # List of allowed extra words (case-insensitive, alphanumeric only)
+            "ok", "okay", "activate", "please", "hey", "hello", "hi", "greetings",
+            "excuse", "pardon", "listen", "attention", "wake", "start",
+            "ready", "go", "begin", "now", "dear", "good"
+        ]
+        # whisperurl=None,       # (Optional) URL for STT server
+        # whispermodel="tiny",  # (Optional) Whisper model name
+        # languages=None,        # (Optional) List of allowed languages
+        # timeout=30,            # (Optional) STT timeout in seconds
     )
 
     print("Listening for wake word... (Ctrl+C to exit)")
